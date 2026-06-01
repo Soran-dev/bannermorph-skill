@@ -27,7 +27,7 @@ const FETCH_TIMEOUT_MS = 20_000
 const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024 // 15MB
 
 async function main() {
-  const { source, cache_dir } = readArgs()
+  const { source, cache_dir, allow_partial } = readArgs()
   if (!source || typeof source !== 'object') {
     fail('INVALID_ARGS', 'source 字段必填', [
       '传 source: { image|folder|excel|url|urls } 中任选其一',
@@ -36,29 +36,54 @@ async function main() {
   const cacheDir = cache_dir || path.join(os.tmpdir(), 'bannermorph-products')
   ensureDir(cacheDir)
 
-  let paths = []
+  let result = { paths: [], failed: [], expected: null }
   if (source.image) {
-    paths = await fromImage(source.image)
+    result.paths = await fromImage(source.image)
   } else if (source.folder) {
-    paths = await fromFolder(source.folder)
+    result.paths = await fromFolder(source.folder)
   } else if (source.excel) {
-    paths = await fromExcel(source.excel, cacheDir)
+    result = await fromExcel(source.excel, cacheDir)
   } else if (Array.isArray(source.urls)) {
-    paths = await fromUrls(source.urls, cacheDir)
+    result = await fromUrls(source.urls, cacheDir)
   } else if (source.url) {
-    paths = await fromUrl(source.url, cacheDir)
+    result.paths = await fromUrl(source.url, cacheDir)
   } else {
     fail('INVALID_ARGS', 'source 必须包含 image / folder / excel / url / urls 中至少一个', [
       '检查你传的 source 字段',
     ])
   }
 
-  if (paths.length === 0) {
+  if (result.paths.length === 0) {
     fail('NO_PRODUCTS', '没找到任何商品图片', [
       '检查路径 / 文件夹里有没有图 / Excel 里有没有图片 URL 列',
     ])
   }
-  ok({ product_paths: paths, count: paths.length })
+
+  // 部分下载失败 — 默认拒绝(避免静默丢图),allow_partial=true 才放行
+  if (result.failed && result.failed.length > 0) {
+    if (!allow_partial) {
+      const failPreview = result.failed.slice(0, 5).map((f) => `${f.url} → ${f.reason}`)
+      fail(
+        'PARTIAL_DOWNLOAD_FAILED',
+        `从源里找到 ${result.expected} 张图,只成功下载 ${result.paths.length} 张,${result.failed.length} 张失败`,
+        [
+          `失败清单 (前 5 条): ${JSON.stringify(failPreview)}`,
+          '如果用户同意"成功多少算多少",重新调用本脚本时加 "allow_partial": true',
+          '如果用户希望全部下完,先排查失败 URL(可能是网络抖动 → retry,或源失效 → 让用户换 URL)',
+        ],
+      )
+    }
+    // allow_partial=true 时仍要在结果里如实暴露
+    ok({
+      product_paths: result.paths,
+      count: result.paths.length,
+      expected: result.expected,
+      failed: result.failed,
+      partial: true,
+    })
+  }
+
+  ok({ product_paths: result.paths, count: result.paths.length })
 }
 
 async function fromImage(imagePath) {
@@ -158,36 +183,15 @@ async function fromExcel(excelPath, cacheDir) {
       '或列名包含 image / img / photo / picture / 主图 / 图片 / 图像',
     ])
   }
-  // 并发下载
-  const results = []
-  const errors = []
-  await Promise.all(
-    unique.map(async (url, i) => {
-      try {
-        const localPath = await downloadOne(url, cacheDir)
-        results[i] = localPath
-      } catch (e) {
-        errors.push({ url, reason: e.message })
-      }
-    }),
-  )
-  const downloaded = results.filter(Boolean)
-  if (downloaded.length === 0) {
-    fail('DOWNLOAD_FAILED', '所有图片下载失败', errors.slice(0, 5).map((e) => `${e.url} → ${e.reason}`))
-  }
-  return downloaded
+  // 并发下载 — 抽出来给 fromExcel / fromUrls 共用,失败列表如实暴露
+  return await batchDownload(unique, cacheDir)
 }
 
-async function fromUrls(urls, cacheDir) {
-  const cleaned = [...new Set(urls.map((u) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean))]
-  if (cleaned.length === 0) {
-    fail('INVALID_ARGS', 'source.urls 不能是空数组', ['传至少 1 个图片 URL'])
-  }
-  // 并发下载 + 错误聚合 (同 fromExcel 末尾)
+async function batchDownload(urls, cacheDir) {
   const results = []
   const errors = []
   await Promise.all(
-    cleaned.map(async (url, i) => {
+    urls.map(async (url, i) => {
       try {
         results[i] = await downloadOne(url, cacheDir)
       } catch (e) {
@@ -197,9 +201,21 @@ async function fromUrls(urls, cacheDir) {
   )
   const downloaded = results.filter(Boolean)
   if (downloaded.length === 0) {
-    fail('DOWNLOAD_FAILED', '所有图片下载失败', errors.slice(0, 5).map((e) => `${e.url} → ${e.reason}`))
+    fail(
+      'DOWNLOAD_FAILED',
+      `所有 ${urls.length} 张图片下载失败`,
+      errors.slice(0, 5).map((e) => `${e.url} → ${e.reason}`),
+    )
   }
-  return downloaded
+  return { paths: downloaded, failed: errors, expected: urls.length }
+}
+
+async function fromUrls(urls, cacheDir) {
+  const cleaned = [...new Set(urls.map((u) => (typeof u === 'string' ? u.trim() : '')).filter(Boolean))]
+  if (cleaned.length === 0) {
+    fail('INVALID_ARGS', 'source.urls 不能是空数组', ['传至少 1 个图片 URL'])
+  }
+  return await batchDownload(cleaned, cacheDir)
 }
 
 async function fromUrl(url, cacheDir) {

@@ -1,31 +1,7 @@
-# Sensitive (NEVER commit)
 .env
-.env.local
-.env.*.local
-
-# Runtime artifacts (per-install, not part of source)
+node_modules/
+*.log
+.DS_Store
 work/
 .quota-log
 _progress.jsonl
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Editors / OS
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Logs
-*.log
-
-# Local user output (in case anyone runs the skill from the repo root)
-output/
-test-output/

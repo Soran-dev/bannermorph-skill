@@ -47,9 +47,21 @@ Node modules not installed.
 
 ## DOWNLOAD_FAILED
 
-URL download failed (SSRF block, timeout, HTTP error).
+URL download failed (SSRF block, timeout, HTTP error). Returned when **all** URLs from the source failed to download.
 
 - Action: Show the user the underlying reason (in `next_steps`); usually a bad URL or a non-public host.
+
+## PARTIAL_DOWNLOAD_FAILED
+
+`parse_products` found N image URLs in the source but only M downloaded successfully (M < N, M > 0). Default behavior is to refuse and surface the missing ones, so the user knows the batch is incomplete before generation starts.
+
+- The `next_steps` includes a JSON-formatted failure list (URL → reason).
+- Action: Tell the user N images expected, M downloaded, the failed URL list. Ask whether to:
+  1. **Retry the failed URLs** (often network blips — second attempt usually succeeds)
+  2. **Proceed with the M downloaded** (call `parse_products` again with `"allow_partial": true`)
+  3. **Fix the source** (some URLs are dead → user updates Excel / link list)
+
+This was added after a real incident: a 5-URL Excel silently became a 4-image batch because of one transient network hiccup, and the user didn't realize until comparing the final report to the original product list.
 
 ## QUOTA_EXCEEDED
 
