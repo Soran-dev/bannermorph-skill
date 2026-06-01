@@ -1,0 +1,19 @@
+{
+  "name": "bannermorph-skill",
+  "version": "0.1.0",
+  "description": "BannerMorph — 上传 banner 模板 + 商品图,AI 批量生成 banner skill (for qoderwork / AI 工作台)",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "config": "node scripts/config.js",
+    "parse": "node scripts/parse_products.js",
+    "generate": "node scripts/generate_batch.js",
+    "retry": "node scripts/retry_batch.js",
+    "report": "node scripts/write_report.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
